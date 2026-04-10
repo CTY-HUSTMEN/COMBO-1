@@ -8,12 +8,13 @@
 <title>COMBO 1</title>
 <link rel="icon" href="logo.png">
 
-<!-- 🔥 FIREBASE -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, runTransaction, push } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-// ⚠️ THAY CONFIG CỦA BẠN
+// =====================
+// FIREBASE CONFIG
+// =====================
 const firebaseConfig = {
   apiKey: "AIzaSyBtdk8zuVGkueYcRurRIAWIm_AlTrrGg9Y",
   authDomain: "su-kien-fe294.firebaseapp.com",
@@ -21,8 +22,7 @@ const firebaseConfig = {
   projectId: "su-kien-fe294",
   storageBucket: "su-kien-fe294.firebasestorage.app",
   messagingSenderId: "863152941656",
-  appId: "1:863152941656:web:f4adea7c33d941a9d8b82d",
-  measurementId: "G-VB3DHXB02K"
+  appId: "1:863152941656:web:f4adea7c33d941a9d8b82d"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -33,6 +33,7 @@ const db = getDatabase(app);
 // =====================
 window.type = "";
 const ITEM_NAME = "COMBO_1";
+let isProcessing = false; // 🔥 FIX CHÍNH
 
 // =====================
 // STEP UI
@@ -46,7 +47,7 @@ window.goStep = function(step, selectedType=""){
 
     if(step===2){
         document.getElementById("stepTitle").innerText =
-            type==="gift" ? "Nhận quà" : "Mua sản phẩm";
+            type==="gift" ? "Nhận quà" : "Bán sản phẩm";
     }
 }
 
@@ -58,7 +59,7 @@ window.resetForm = function(){
 }
 
 // =====================
-// 🔥 REALTIME STOCK
+// REALTIME STOCK
 // =====================
 const stockRef = ref(db, "kho/" + ITEM_NAME + "/stock");
 
@@ -77,19 +78,23 @@ onValue(stockRef, (snapshot) => {
     }
 
     const btn = document.querySelector("#step2 button");
-    if(btn){
+
+    // 🔥 CHỐNG override khi đang xử lý
+    if(btn && !isProcessing){
         btn.disabled = stock <= 0;
     }
 });
 
 // =====================
-// 🔥 SUBMIT (TRANSACTION)
+// SUBMIT
 // =====================
 window.submitForm = function(){
 
     let btn = document.querySelector("#step2 button");
 
-    if(btn.disabled) return;
+    if(btn.disabled || isProcessing) return;
+
+    isProcessing = true;
 
     btn.disabled = true;
     btn.innerText = "Đang xử lý...";
@@ -101,6 +106,7 @@ window.submitForm = function(){
         alert("Vui lòng chọn quầy");
         btn.disabled = false;
         btn.innerText = "Xác nhận";
+        isProcessing = false;
         return;
     }
 
@@ -117,7 +123,7 @@ window.submitForm = function(){
         }
 
         if (data.stock < quantity) {
-            return; // ❌ không đủ hàng
+            return;
         }
 
         data.stock -= quantity;
@@ -134,7 +140,7 @@ window.submitForm = function(){
             return;
         }
 
-        // 🔥 LOG
+        // LOG
         const logRef = ref(db, "logs/" + type);
 
         push(logRef, {
@@ -144,24 +150,27 @@ window.submitForm = function(){
             counter: counter
         });
 
-        resetForm();
+        // 🔥 delay nhẹ cho UX mượt
+        setTimeout(() => {
+            resetForm();
+        }, 300);
 
     }).catch(() => {
         alert("Lỗi hệ thống");
     }).finally(() => {
         btn.disabled = false;
         btn.innerText = "Xác nhận";
+        isProcessing = false;
     });
 }
 </script>
 
 <style>
-/* GIỮ NGUYÊN CSS CỦA BẠN */
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{width:100%;min-height:100dvh;overflow-x:hidden;font-family:'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#ffcc99,#ffffff);}
-body{display:flex;justify-content:center;align-items:center;position:relative;}
-.wrapper{width:100%;display:flex;justify-content:center;align-items:center;padding:20px;z-index:10;}
-.container{background:white;padding:30px;border-radius:20px;text-align:center;width:95%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,0.1);z-index:20;}
+body{display:flex;justify-content:center;align-items:center;}
+.wrapper{width:100%;display:flex;justify-content:center;align-items:center;padding:20px;}
+.container{background:white;padding:30px;border-radius:20px;text-align:center;width:95%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,0.1);}
 .logo{width:180px;margin-bottom:10px;}
 .title{font-size:26px;font-weight:bold;color:#ff9800;margin-bottom:10px;}
 input,select{width:100%;padding:12px;margin-bottom:15px;border-radius:10px;border:1px solid #ddd;font-size:16px;}
@@ -184,7 +193,7 @@ button{width:100%;padding:15px;background:#ff9800;color:white;border:none;border
 
     <button onclick="goStep(2,'gift')">QUÀ TẶNG</button>
     <br><br>
-    <button onclick="goStep(2,'buy')">MUA</button>
+    <button onclick="goStep(2,'buy')">BÁN</button>
 </div>
 
 <div id="step2" style="display:none;">
@@ -197,8 +206,8 @@ button{width:100%;padding:15px;background:#ff9800;color:white;border:none;border
 
     <select id="counter">
         <option value="">-- Chọn quầy --</option>
-        <option value="A">Quầy A</option>
-        <option value="B">Quầy B</option>
+        <option value="LA">LA</option>
+        <option value="QUAN_7">QUẬN 7</option>
     </select>
 
     <input type="number" id="quantity" min="1" value="1">
