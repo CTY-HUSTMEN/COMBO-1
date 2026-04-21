@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+<title>COMBO 1</title>
+<link rel="icon" href="logo.png">
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, onValue, runTransaction, push } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+// =====================
+// FIREBASE CONFIG
+// =====================
+const firebaseConfig = {
+  apiKey: "AIzaSyBtdk8zuVGkueYcRurRIAWIm_AlTrrGg9Y",
+  authDomain: "su-kien-fe294.firebaseapp.com",
+  databaseURL: "https://su-kien-fe294-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "su-kien-fe294",
+  storageBucket: "su-kien-fe294.firebasestorage.app",
+  messagingSenderId: "863152941656",
+  appId: "1:863152941656:web:f4adea7c33d941a9d8b82d"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// =====================
+// BIẾN
+// =====================
+window.type = "";
+const ITEM_NAME = "COMBO_1";
+let isProcessing = false;
+let unsubscribe = null;
+
+// =====================
+// STEP UI
+// =====================
+// =====================
+// STEP UI
+// =====================
+window.goStep = function(step, selectedType=""){
+    if(selectedType) type = selectedType;
+
+    // 🔥 ẨN TẤT CẢ STEP (Kiểm tra tồn tại trước khi ẩn)
+    if (document.getElementById("step1")) document.getElementById("step1").style.display="none";
+    if (document.getElementById("step2")) document.getElementById("step2").style.display="none";
+    if (document.getElementById("step3")) document.getElementById("step3").style.display="none";
+
+    // 🔥 HIỆN STEP CẦN
+    let targetStep = document.getElementById("step" + step);
+    if (targetStep) {
+        targetStep.style.display="block";
+    }
+
+    if(step===2){
+        document.getElementById("stepTitle").innerText =
+            type==="gift" ? "Nhận quà" : "Bán sản phẩm";
+        let btnStep2 = document.querySelector("#step2 button");
+        if (btnStep2) btnStep2.disabled = true;
+    }
+
+    if(step===3){
+        if (document.getElementById("addQuantity")) {
+            document.getElementById("addQuantity").value = 1;
+        }
+    }
+}
+
+window.resetForm = function(){
+    // step2
+    if (document.getElementById("quantity")) document.getElementById("quantity").value=1;
+    if (document.getElementById("counter")) document.getElementById("counter").value="";
+    if (document.getElementById("addHuongType")) document.getElementById("addHuongType").value="";
+
+    // 🔥 step3 (Kiểm tra tồn tại trước khi reset)
+    if (document.getElementById("addCounter")) document.getElementById("addCounter").value="";
+    if (document.getElementById("addCombo")) document.getElementById("addCombo").value="";
+    if (document.getElementById("addQuantity")) document.getElementById("addQuantity").value=1;
+
+    // 🔥 clear realtime listener
+    if(unsubscribe){
+        unsubscribe();
+        unsubscribe = null;
+    }
+
+    type="";
+    goStep(1);
+}
+window.addStock = function(){
+
+    const counter = document.getElementById("addCounter").value;
+    const combo = "COMBO_1";
+    const quantity = Number(document.getElementById("addQuantity").value);
+    const huongType = document.getElementById("addHuongType").value;
+
+    if(!counter || !huongType){
+        alert("Chọn đầy đủ thông tin");
+        return;
+    }
+
+    const comboRef = ref(db, "kho/" + counter + "/" + combo);
+    const muiRef   = ref(db, "kho/" + counter + "/TUI_HUT_MUI_GIAY");
+    const huongRef = ref(db, "kho/" + counter + "/TUI_TOA_HUONG/" + huongType);
+
+    // =========================
+    // 1. CHECK NGUYÊN LIỆU
+    // =========================
+    Promise.all([
+        runTransaction(muiRef, data => data),
+        runTransaction(huongRef, data => data)
+    ]).then(([muiSnap, huongSnap]) => {
+
+        const mui = muiSnap.snapshot.val()?.stock || 0;
+        const huong = huongSnap.snapshot.val()?.stock || 0;
+
+        if(mui < quantity || huong < quantity*2){
+            alert("Không đủ hàng để thêm vào combo");
+            return;
+        }
+
+        // =========================
+        // 2. TRỪ + CỘNG (ROOT TRANSACTION)
+        // =========================
+        runTransaction(ref(db), (root) => {
+
+            if(!root) return root;
+
+            const path = root.kho[counter];
+
+            if(!path) return;
+
+            const muiStock = path["TUI_HUT_MUI_GIAY"]?.stock || 0;
+            const huongStock = path["TUI_TOA_HUONG"]?.[huongType]?.stock || 0;
+
+            if(muiStock < quantity || huongStock < quantity*2){
+                return; // fail
+            }
+
+            // 🔻 trừ nguyên liệu
+            path["TUI_HUT_MUI_GIAY"].stock -= quantity;
+            path["TUI_TOA_HUONG"][huongType].stock -= quantity*2;
+
+            // 🔺 cộng combo
+            if(!path[combo]){
+                path[combo] = { stock: 0 };
+            }
+
+            path[combo].stock = (path[combo].stock || 0) + quantity;
+
+            return root;
+
+        }).then(res => {
+
+            if(!res.committed){
+                alert("Lỗi cập nhật");
+                return;
+            }
+
+            // =========================
+            // LOG
+            // =========================
+            const logRef = ref(db, "logs/add");
+
+            push(logRef, {
+                time: Date.now(),
+                item: combo,
+                quantity: quantity,
+                counter: counter,
+
+                materials: {
+                    TUI_HUT_MUI_GIAY: quantity,
+                    ["TUI_TOA_HUONG_" + huongType]: quantity * 2
+                }
+            });
+
+            alert("Thêm hàng thành công");
+            goStep(1);
+        });
+
+    });
+}
+
+// =====================
+// REALTIME STOCK (NEW - THEO HƯƠNG)
+// =====================
+
+// Thêm sự kiện lắng nghe cho cả 2 ô chọn hương
+document.getElementById("counter").addEventListener("change", listenStock);
+document.getElementById("addHuongType1").addEventListener("change", listenStock);
+document.getElementById("addHuongType2").addEventListener("change", listenStock);
+document.getElementById("quantity").addEventListener("input", listenStock);
+
+function listenStock(){
+    const counter = document.getElementById("counter").value;
+    const h1 = document.getElementById("addHuongType1").value;
+    const h2 = document.getElementById("addHuongType2").value;
+    const qty = Number(document.getElementById("quantity").value) || 1;
+    const btn = document.querySelector("#step2 button");
+
+    if(!counter || !h1){
+        document.getElementById("stockMui").innerText = "Túi hút mùi giày: ...";
+        document.getElementById("stockHuong").innerText = "Túi tỏa hương: ...";
+        btn.disabled = true;
+        return;
+    }
+
+    if(window.unsub) window.unsub.forEach(fn => fn());
+    window.unsub = [];
+
+    // Lắng nghe Hút mùi
+    const muiRef = ref(db, `kho/${counter}/TUI_HUT_MUI_GIAY/stock`);
+    window.unsub.push(onValue(muiRef, snap => {
+        const stock = snap.val() || 0;
+        document.getElementById("stockMui").innerText = `Túi hút mùi giày: ${stock}`;
+        updateStatus();
+    }));
+
+    // Lắng nghe Hương 1
+    const h1Ref = ref(db, `kho/${counter}/TUI_TOA_HUONG/${h1}/stock`);
+    window.unsub.push(onValue(h1Ref, snap => {
+        window.s1 = snap.val() || 0;
+        updateStatus();
+    }));
+
+    // Lắng nghe Hương 2 (nếu có)
+    if(h2 && h2 !== h1){
+        const h2Ref = ref(db, `kho/${counter}/TUI_TOA_HUONG/${h2}/stock`);
+        window.unsub.push(onValue(h2Ref, snap => {
+            window.s2 = snap.val() || 0;
+            updateStatus();
+        }));
+    } else {
+        window.s2 = null; 
+        updateStatus();
+    }
+
+    function updateStatus(){
+        const mStock = parseInt(document.getElementById("stockMui").innerText.split(": ")[1]) || 0;
+        let isOk = mStock >= qty;
+        let huongText = `Hương 1: ${window.s1 || 0}`;
+        
+        if(h2 && h2 !== h1){
+            huongText += ` | Hương 2: ${window.s2 || 0}`;
+            if(window.s1 < qty || (window.s2 || 0) < qty) isOk = false;
+        } else {
+            if(window.s1 < (qty * 2)) isOk = false;
+        }
+
+        document.getElementById("stockHuong").innerText = huongText;
+        btn.disabled = !isOk;
+        document.getElementById("stockWarning").innerText = isOk ? "" : "Không đủ hàng!";
+    }
+}
+
+window.submitForm = function(){
+    let btn = document.querySelector("#step2 button");
+    if(btn.disabled || isProcessing) return;
+
+    isProcessing = true;
+    btn.disabled = true;
+    btn.innerText = "Đang xử lý...";
+
+    const quantity = Number(document.getElementById("quantity").value);
+    const counter = document.getElementById("counter").value;
+    const h1 = document.getElementById("addHuongType1").value;
+    const h2 = document.getElementById("addHuongType2").value;
+
+    runTransaction(ref(db), (root) => {
+        if(!root) return root;
+        const path = root.kho[counter];
+        
+        // 1. Kiểm tra hút mùi
+        if((path["TUI_HUT_MUI_GIAY"]?.stock || 0) < quantity) return;
+
+        // 2. Kiểm tra & Trừ hương
+        if(h2 && h2 !== h1){
+            // Mix 2 loại: mỗi loại trừ 1 (nhân với số lượng combo)
+            if((path["TUI_TOA_HUONG"][h1]?.stock || 0) < quantity) return;
+            if((path["TUI_TOA_HUONG"][h2]?.stock || 0) < quantity) return;
+            
+            path["TUI_HUT_MUI_GIAY"].stock -= quantity;
+            path["TUI_TOA_HUONG"][h1].stock -= quantity;
+            path["TUI_TOA_HUONG"][h2].stock -= quantity;
+        } else {
+            // 1 loại: trừ 2
+            if((path["TUI_TOA_HUONG"][h1]?.stock || 0) < (quantity * 2)) return;
+            
+            path["TUI_HUT_MUI_GIAY"].stock -= quantity;
+            path["TUI_TOA_HUONG"][h1].stock -= (quantity * 2);
+        }
+
+        // 3. Cập nhật thống kê Combo
+        if(!path["COMBO_1"]) path["COMBO_1"] = {};
+        const vName = (h2 && h2 !== h1) ? `${h1}_${h2}` : h1;
+        if(!path["COMBO_1"][vName]) path["COMBO_1"][vName] = {stock:0, daBan:0, daTang:0};
+        
+        if(type === "buy") path["COMBO_1"][vName].daBan += quantity;
+        else path["COMBO_1"][vName].daTang += quantity;
+
+        return root;
+    }).then(res => {
+        if(!res.committed){
+            alert("Lỗi: Không đủ hàng hoặc dữ liệu quầy sai!");
+            return;
+        }
+
+        // ==========================================
+        // PHẦN BỊ THIẾU: ĐẨY DỮ LIỆU LÊN LOG FIREBASE
+        // ==========================================
+        const logRef = ref(db, "logs/" + type); // Ghi vào logs/buy hoặc logs/gift
+
+        const vName = (h2 && h2 !== h1) ? `${h1}_${h2}` : h1;
+        
+        // Tạo cấu trúc nguyên liệu đã tiêu hao để hiển thị đúng bên Google Sheet
+        let materialsLog = {
+            TUI_HUT_MUI_GIAY: quantity
+        };
+        if (h2 && h2 !== h1) {
+            materialsLog["TUI_TOA_HUONG_" + h1] = quantity;
+            materialsLog["TUI_TOA_HUONG_" + h2] = quantity;
+        } else {
+            materialsLog["TUI_TOA_HUONG_" + h1] = quantity * 2;
+        }
+
+        push(logRef, {
+            time: Date.now(),
+            item: "COMBO_1",
+            variant: vName, 
+            quantity: quantity,
+            counter: counter,
+            materials: materialsLog
+        });
+
+       // alert("Thành công!");
+        resetForm();
+
+    }).catch((err) => {
+        alert("Lỗi hệ thống: " + err.message);
+    }).finally(() => {
+        isProcessing = false;
+        btn.innerText = "Xác nhận";
+        btn.disabled = false;
+    });
+}
+</script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;min-height:100dvh;overflow-x:hidden;font-family:'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#ffcc99,#ffffff);}
+body{display:flex;justify-content:center;align-items:center;}
+.wrapper{width:100%;display:flex;justify-content:center;align-items:center;padding:20px;}
+.container{background:white;padding:30px;border-radius:20px;text-align:center;width:95%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,0.1);}
+.logo{width:180px;margin-bottom:10px;}
+.title{font-size:26px;font-weight:bold;color:#ff9800;margin-bottom:10px;}
+input,select{width:100%;padding:12px;margin-bottom:15px;border-radius:10px;border:1px solid #ddd;font-size:16px;}
+button{width:100%;padding:15px;background:#ff9800;color:white;border:none;border-radius:12px;font-size:18px;font-weight:bold;}
+.stock{font-weight:bold;margin-bottom:10px;}
+.warning{color:red;font-weight:bold;margin-bottom:10px;}
+</style>
+
+</head>
+
+<body>
+
+<div class="wrapper">
+<div class="container">
+
+<div id="step1">
+    <img src="logo.png" class="logo">
+    <div class="title">HUST MEN</div>
+    <p style="font-weight:bold;margin-bottom:10px;">COMBO 1</p>
+
+    <button onclick="goStep(2,'gift')">QUÀ TẶNG</button>
+    <br><br>
+    <button onclick="goStep(2,'buy')">BÁN</button>
+    <br><br>
+</div>
+
+<div id="step2" style="display:none;">
+    <p id="stepTitle"></p>
+    <p style="font-weight:bold;margin-bottom:10px;">COMBO 1 (1 Hút mùi giày + 2 Tỏa hương)</p>
+
+    <div id="stockInfo" style="background: #f9f9f9; padding: 10px; border-radius: 10px; margin-bottom: 15px; font-size: 16px; text-align: center;">
+        <div id="stockMui">Túi hút mùi giày: ...</div>
+        <div id="stockHuong">Túi tỏa hương: ...</div>
+    </div>
+    
+    <div class="warning" id="stockWarning"></div>
+
+    <select id="counter">
+        <option value="">-- Chọn quầy --</option>
+        <option value="A125">A125</option>
+        <option value="B857">B857</option>  
+    </select>
+    <select id="addHuongType1">
+        <option value="">Chọn hương 1</option>
+        <option value="Nhai">Nhài</option>
+        <option value="Buoi">Bưởi</option>
+        <option value="Oai_huong">Oải hương</option>
+        <option value="Hoa_hong">Hoa Hồng</option>
+        <option value="Que">Quế</option>
+        <option value="Ca_phe">Cà phê</option>
+    </select>
+
+    <select id="addHuongType2">
+        <option value="">Chọn hương 2 (Để trống nếu lấy cùng loại)</option>
+        <option value="Nhai">Nhài</option>
+        <option value="Buoi">Bưởi</option>
+        <option value="Oai_huong">Oải hương</option>
+        <option value="Hoa_hong">Hoa Hồng</option>
+        <option value="Que">Quế</option>
+        <option value="Ca_phe">Cà phê</option>
+    </select>
+
+    <input type="number" id="quantity" min="1" value="1">
+
+    <button onclick="submitForm()">Xác nhận</button>
+</div>
+
+
+
+</div>
+</div>
+
+</body>
+</html>
